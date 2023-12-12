@@ -1,7 +1,9 @@
 ﻿using System.Reflection;
+using Bit.Core.AdminConsole.Entities;
+using Bit.Core.AdminConsole.Entities.Provider;
+using Bit.Core.Auth.Entities;
+using Bit.Core.Auth.Models.Business;
 using Bit.Core.Entities;
-using Bit.Core.Entities.Provider;
-using Bit.Core.Models.Business;
 using Bit.Core.Services;
 using Bit.Core.Settings;
 using Microsoft.Extensions.Logging;
@@ -38,7 +40,7 @@ public class HandlebarsMailServiceTests
         // This will send all emails to the test email address so that they can be viewed.
         var namedParameters = new Dictionary<(string, Type), object>
         {
-            // TODO: Swith to use env variable
+            // TODO: Switch to use env variable
             { ("email", typeof(string)), "test@bitwarden.com" },
             { ("user", typeof(User)), new User
             {

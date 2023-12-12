@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Reflection;
 using System.Text;
+using System.Web;
 using Bit.Billing.Models;
 using Bit.Core.Repositories;
 using Bit.Core.Settings;
@@ -43,7 +44,7 @@ public class FreshdeskController : Controller
     public async Task<IActionResult> PostWebhook([FromQuery, Required] string key,
         [FromBody, Required] FreshdeskWebhookModel model)
     {
-        if (string.IsNullOrWhiteSpace(key) || !CoreHelpers.FixedTimeEquals(key, _billingSettings.FreshdeskWebhookKey))
+        if (string.IsNullOrWhiteSpace(key) || !CoreHelpers.FixedTimeEquals(key, _billingSettings.FreshDesk.WebhookKey))
         {
             return new BadRequestResult();
         }
@@ -60,13 +61,14 @@ public class FreshdeskController : Controller
 
             var updateBody = new Dictionary<string, object>();
             var note = string.Empty;
+            note += $"<li>Region: {_billingSettings.FreshDesk.Region}</li>";
             var customFields = new Dictionary<string, object>();
             var user = await _userRepository.GetByEmailAsync(ticketContactEmail);
             if (user != null)
             {
                 var userLink = $"{_globalSettings.BaseServiceUri.Admin}/users/edit/{user.Id}";
                 note += $"<li>User, {user.Email}: {userLink}</li>";
-                customFields.Add("cf_user", userLink);
+                customFields.Add(_billingSettings.FreshDesk.UserFieldName, userLink);
                 var tags = new HashSet<string>();
                 if (user.Premium)
                 {
@@ -76,16 +78,18 @@ public class FreshdeskController : Controller
 
                 foreach (var org in orgs)
                 {
-                    var orgNote = $"{org.Name} ({org.Seats.GetValueOrDefault()}): " +
+                    // Prevent org names from injecting any additional HTML
+                    var orgName = HttpUtility.HtmlEncode(org.Name);
+                    var orgNote = $"{orgName} ({org.Seats.GetValueOrDefault()}): " +
                         $"{_globalSettings.BaseServiceUri.Admin}/organizations/edit/{org.Id}";
                     note += $"<li>Org, {orgNote}</li>";
-                    if (!customFields.Any(kvp => kvp.Key == "cf_org"))
+                    if (!customFields.Any(kvp => kvp.Key == _billingSettings.FreshDesk.OrgFieldName))
                     {
-                        customFields.Add("cf_org", orgNote);
+                        customFields.Add(_billingSettings.FreshDesk.OrgFieldName, orgNote);
                     }
                     else
                     {
-                        customFields["cf_org"] += $"\n{orgNote}";
+                        customFields[_billingSettings.FreshDesk.OrgFieldName] += $"\n{orgNote}";
                     }
 
                     var planName = GetAttribute<DisplayAttribute>(org.PlanType).Name.Split(" ").FirstOrDefault();
@@ -145,9 +149,9 @@ public class FreshdeskController : Controller
     {
         try
         {
-            var freshdeskAuthkey = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_billingSettings.FreshdeskApiKey}:X"));
+            var freshdeskAuthkey = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_billingSettings.FreshDesk.ApiKey}:X"));
             var httpClient = _httpClientFactory.CreateClient("FreshdeskApi");
-            request.Headers.Add("Authorization", freshdeskAuthkey);
+            request.Headers.Add("Authorization", $"Basic {freshdeskAuthkey}");
             var response = await httpClient.SendAsync(request);
             if (response.StatusCode != System.Net.HttpStatusCode.TooManyRequests || retriedCount > 3)
             {

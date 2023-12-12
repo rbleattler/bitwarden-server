@@ -23,7 +23,7 @@ public class CollectionRequestModel
         });
     }
 
-    public Collection ToCollection(Collection existingCollection)
+    public virtual Collection ToCollection(Collection existingCollection)
     {
         existingCollection.Name = Name;
         existingCollection.ExternalId = ExternalId;
@@ -34,6 +34,16 @@ public class CollectionRequestModel
 public class CollectionBulkDeleteRequestModel
 {
     [Required]
-    public IEnumerable<string> Ids { get; set; }
-    public string OrganizationId { get; set; }
+    public IEnumerable<Guid> Ids { get; set; }
+}
+
+public class CollectionWithIdRequestModel : CollectionRequestModel
+{
+    public Guid? Id { get; set; }
+
+    public override Collection ToCollection(Collection existingCollection)
+    {
+        existingCollection.Id = Id ?? Guid.Empty;
+        return base.ToCollection(existingCollection);
+    }
 }

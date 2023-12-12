@@ -1,6 +1,9 @@
-﻿using Bit.Core.Context;
+﻿using Bit.Core.AdminConsole.Entities;
+using Bit.Core.AdminConsole.Entities.Provider;
+using Bit.Core.AdminConsole.Models.Data.Provider;
+using Bit.Core.AdminConsole.Repositories;
+using Bit.Core.Context;
 using Bit.Core.Entities;
-using Bit.Core.Entities.Provider;
 using Bit.Core.Enums;
 using Bit.Core.Models.Data;
 using Bit.Core.Models.Data.Organizations;
@@ -333,25 +336,37 @@ public class EventService : IEventService
     public async Task LogProviderOrganizationEventAsync(ProviderOrganization providerOrganization, EventType type,
         DateTime? date = null)
     {
+        await LogProviderOrganizationEventsAsync(new[] { (providerOrganization, type, date) });
+    }
+
+    public async Task LogProviderOrganizationEventsAsync(IEnumerable<(ProviderOrganization, EventType, DateTime?)> events)
+    {
         var providerAbilities = await _applicationCacheService.GetProviderAbilitiesAsync();
-        if (!CanUseProviderEvents(providerAbilities, providerOrganization.ProviderId))
+        var eventMessages = new List<IEvent>();
+        foreach (var (providerOrganization, type, date) in events)
         {
-            return;
+            if (!CanUseProviderEvents(providerAbilities, providerOrganization.ProviderId))
+            {
+                continue;
+            }
+
+            var e = new EventMessage(_currentContext)
+            {
+                ProviderId = providerOrganization.ProviderId,
+                ProviderOrganizationId = providerOrganization.Id,
+                Type = type,
+                ActingUserId = _currentContext?.UserId,
+                Date = date.GetValueOrDefault(DateTime.UtcNow)
+            };
+
+            eventMessages.Add(e);
         }
 
-        var e = new EventMessage(_currentContext)
-        {
-            ProviderId = providerOrganization.ProviderId,
-            ProviderOrganizationId = providerOrganization.Id,
-            Type = type,
-            ActingUserId = _currentContext?.UserId,
-            Date = date.GetValueOrDefault(DateTime.UtcNow)
-        };
-        await _eventWriteService.CreateAsync(e);
+        await _eventWriteService.CreateManyAsync(eventMessages);
     }
 
     public async Task LogOrganizationDomainEventAsync(OrganizationDomain organizationDomain, EventType type,
-        DateTime? date = null)
+            DateTime? date = null)
     {
         var orgAbilities = await _applicationCacheService.GetOrganizationAbilitiesAsync();
         if (!CanUseEvents(orgAbilities, organizationDomain.OrganizationId))
@@ -395,21 +410,33 @@ public class EventService : IEventService
 
     public async Task LogServiceAccountSecretEventAsync(Guid serviceAccountId, Secret secret, EventType type, DateTime? date = null)
     {
+        await LogServiceAccountSecretsEventAsync(serviceAccountId, new[] { secret }, type, date);
+    }
+
+    public async Task LogServiceAccountSecretsEventAsync(Guid serviceAccountId, IEnumerable<Secret> secrets, EventType type, DateTime? date = null)
+    {
         var orgAbilities = await _applicationCacheService.GetOrganizationAbilitiesAsync();
-        if (!CanUseEvents(orgAbilities, secret.OrganizationId))
+        var eventMessages = new List<IEvent>();
+
+        foreach (var secret in secrets)
         {
-            return;
+            if (!CanUseEvents(orgAbilities, secret.OrganizationId))
+            {
+                continue;
+            }
+
+            var e = new EventMessage(_currentContext)
+            {
+                OrganizationId = secret.OrganizationId,
+                Type = type,
+                SecretId = secret.Id,
+                ServiceAccountId = serviceAccountId,
+                Date = date.GetValueOrDefault(DateTime.UtcNow)
+            };
+            eventMessages.Add(e);
         }
 
-        var e = new EventMessage(_currentContext)
-        {
-            OrganizationId = secret.OrganizationId,
-            Type = type,
-            SecretId = secret.Id,
-            ServiceAccountId = serviceAccountId,
-            Date = date.GetValueOrDefault(DateTime.UtcNow)
-        };
-        await _eventWriteService.CreateAsync(e);
+        await _eventWriteService.CreateManyAsync(eventMessages);
     }
 
     private async Task<Guid?> GetProviderIdAsync(Guid? orgId)

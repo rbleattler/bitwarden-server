@@ -1,4 +1,5 @@
-﻿using Bit.Core.Jobs;
+﻿using Bit.Api.Auth.Jobs;
+using Bit.Core.Jobs;
 using Bit.Core.Settings;
 using Quartz;
 
@@ -40,6 +41,11 @@ public class JobsHostedService : BaseJobsHostedService
             .StartNow()
             .WithCronSchedule("0 30 */12 * * ?")
             .Build();
+        var smTrashCleanupTrigger = TriggerBuilder.Create()
+            .WithIdentity("SMTrashCleanupTrigger")
+            .StartNow()
+            .WithCronSchedule("0 0 22 * * ?")
+            .Build();
         var randomDailySponsorshipSyncTrigger = TriggerBuilder.Create()
             .WithIdentity("RandomDailySponsorshipSyncTrigger")
             .StartAt(DateBuilder.FutureDate(new Random().Next(24), IntervalUnit.Hour))
@@ -69,6 +75,10 @@ public class JobsHostedService : BaseJobsHostedService
             jobs.Add(new Tuple<Type, ITrigger>(typeof(SelfHostedSponsorshipSyncJob), randomDailySponsorshipSyncTrigger));
         }
 
+#if !OSS
+        jobs.Add(new Tuple<Type, ITrigger>(typeof(EmptySecretsManagerTrashJob), smTrashCleanupTrigger));
+#endif
+
         Jobs = jobs;
 
         await base.StartAsync(cancellationToken);
@@ -86,5 +96,10 @@ public class JobsHostedService : BaseJobsHostedService
         services.AddTransient<ValidateUsersJob>();
         services.AddTransient<ValidateOrganizationsJob>();
         services.AddTransient<ValidateOrganizationDomainJob>();
+    }
+
+    public static void AddCommercialSecretsManagerJobServices(IServiceCollection services)
+    {
+        services.AddTransient<EmptySecretsManagerTrashJob>();
     }
 }

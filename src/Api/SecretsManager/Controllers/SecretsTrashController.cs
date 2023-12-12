@@ -8,7 +8,6 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Bit.Api.SecretsManager.Controllers;
 
-[SecretsManager]
 [Authorize("secrets")]
 public class TrashController : Controller
 {

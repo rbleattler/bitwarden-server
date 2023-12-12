@@ -1,7 +1,9 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
+using Bit.Core.Auth.Enums;
+using Bit.Core.Auth.Models;
 using Bit.Core.Enums;
-using Bit.Core.Models;
+using Bit.Core.Tools.Entities;
 using Bit.Core.Utilities;
 using Microsoft.AspNetCore.Identity;
 
@@ -84,6 +86,11 @@ public class User : ITableObject<Guid>, ISubscriber, IStorable, IStorableSubscri
         return Name;
     }
 
+    public string SubscriberName()
+    {
+        return string.IsNullOrWhiteSpace(Name) ? Email : Name;
+    }
+
     public string BraintreeCustomerIdPrefix()
     {
         return "u";
@@ -94,6 +101,11 @@ public class User : ITableObject<Guid>, ISubscriber, IStorable, IStorableSubscri
         return "user_id";
     }
 
+    public string BraintreeCloudRegionField()
+    {
+        return "region";
+    }
+
     public string GatewayIdField()
     {
         return "userId";
@@ -102,6 +114,11 @@ public class User : ITableObject<Guid>, ISubscriber, IStorable, IStorableSubscri
     public bool IsUser()
     {
         return true;
+    }
+
+    public string SubscriberType()
+    {
+        return "Subscriber";
     }
 
     public Dictionary<TwoFactorProviderType, TwoFactorProvider> GetTwoFactorProviders()
@@ -195,5 +212,10 @@ public class User : ITableObject<Guid>, ISubscriber, IStorable, IStorableSubscri
             TwoFactorEnabled = twoFactorEnabled,
             SecurityStamp = SecurityStamp
         };
+    }
+
+    public bool HasMasterPassword()
+    {
+        return MasterPassword != null;
     }
 }

@@ -2,6 +2,7 @@
 using System.Reflection;
 using Bit.Core;
 using DbUp;
+using DbUp.Helpers;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 
@@ -23,10 +24,44 @@ public class DbMigrator
         }.ConnectionString;
     }
 
-    public bool MigrateMsSqlDatabase(bool enableLogging = true,
+    public bool MigrateMsSqlDatabaseWithRetries(bool enableLogging = true,
+        bool repeatable = false,
+        string folderName = MigratorConstants.DefaultMigrationsFolderName,
         CancellationToken cancellationToken = default(CancellationToken))
     {
-        if (enableLogging && _logger != null)
+        var attempt = 1;
+
+        while (attempt < 10)
+        {
+            try
+            {
+                var success = MigrateDatabase(enableLogging, repeatable, folderName, cancellationToken);
+                return success;
+            }
+            catch (SqlException ex)
+            {
+                if (ex.Message.Contains("Server is in script upgrade mode"))
+                {
+                    attempt++;
+                    _logger.LogInformation("Database is in script upgrade mode. " +
+                        $"Trying again (attempt #{attempt})...");
+                    Thread.Sleep(20000);
+                }
+                else
+                {
+                    throw;
+                }
+            }
+        }
+        return false;
+    }
+
+    public bool MigrateDatabase(bool enableLogging = true,
+        bool repeatable = false,
+        string folderName = MigratorConstants.DefaultMigrationsFolderName,
+        CancellationToken cancellationToken = default(CancellationToken))
+    {
+        if (_logger != null)
         {
             _logger.LogInformation(Constants.BypassFiltersEventId, "Migrating database.");
         }
@@ -68,11 +103,19 @@ public class DbMigrator
         cancellationToken.ThrowIfCancellationRequested();
         var builder = DeployChanges.To
             .SqlDatabase(_connectionString)
-            .JournalToSqlTable("dbo", "Migration")
             .WithScriptsAndCodeEmbeddedInAssembly(Assembly.GetExecutingAssembly(),
-                s => s.Contains($".DbScripts.") && !s.Contains(".Archive."))
+                s => s.Contains($".{folderName}.") && !s.Contains(".Archive."))
             .WithTransaction()
             .WithExecutionTimeout(new TimeSpan(0, 5, 0));
+
+        if (repeatable)
+        {
+            builder.JournalTo(new NullJournal());
+        }
+        else
+        {
+            builder.JournalToSqlTable("dbo", MigratorConstants.SqlTableJournalName);
+        }
 
         if (enableLogging)
         {
@@ -89,7 +132,7 @@ public class DbMigrator
         var upgrader = builder.Build();
         var result = upgrader.PerformUpgrade();
 
-        if (enableLogging && _logger != null)
+        if (_logger != null)
         {
             if (result.Successful)
             {

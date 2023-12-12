@@ -70,6 +70,8 @@ public class Startup
             services.AddSingleton<IEventWriteService, RepositoryEventWriteService>();
         }
 
+        services.AddSingleton<IFeatureService, LaunchDarklyFeatureService>();
+
         // Mvc
         services.AddMvc(config =>
         {
@@ -92,6 +94,12 @@ public class Startup
 
         // Add general security headers
         app.UseMiddleware<SecurityHeadersMiddleware>();
+
+        // Forwarding Headers
+        if (globalSettings.SelfHosted)
+        {
+            app.UseForwardedHeaders(globalSettings);
+        }
 
         if (env.IsDevelopment())
         {

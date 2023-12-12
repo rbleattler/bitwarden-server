@@ -1,4 +1,5 @@
 ﻿#nullable enable
+using Bit.Core.AdminConsole.Entities;
 using Bit.Core.Entities;
 using Bit.Core.Utilities;
 
@@ -41,6 +42,7 @@ public class GroupProjectAccessPolicy : BaseAccessPolicy
 {
     public Guid? GroupId { get; set; }
     public Group? Group { get; set; }
+    public bool? CurrentUserInGroup { get; set; }
     public Guid? GrantedProjectId { get; set; }
     public Project? GrantedProject { get; set; }
 }
@@ -49,6 +51,7 @@ public class GroupServiceAccountAccessPolicy : BaseAccessPolicy
 {
     public Guid? GroupId { get; set; }
     public Group? Group { get; set; }
+    public bool? CurrentUserInGroup { get; set; }
     public Guid? GrantedServiceAccountId { get; set; }
     public ServiceAccount? GrantedServiceAccount { get; set; }
 }

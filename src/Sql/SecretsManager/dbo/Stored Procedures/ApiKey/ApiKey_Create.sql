@@ -2,7 +2,7 @@ CREATE PROCEDURE [dbo].[ApiKey_Create]
     @Id UNIQUEIDENTIFIER OUTPUT,
     @ServiceAccountId UNIQUEIDENTIFIER,
     @Name VARCHAR(200),
-    @ClientSecret VARCHAR(30),
+    @ClientSecretHash VARCHAR(128),
     @Scope NVARCHAR(4000),
     @EncryptedPayload NVARCHAR(4000),
     @Key VARCHAR(MAX),
@@ -13,12 +13,12 @@ AS
 BEGIN
     SET NOCOUNT ON
 
-    INSERT INTO [dbo].[ApiKey] 
+    INSERT INTO [dbo].[ApiKey]
     (
         [Id],
         [ServiceAccountId],
         [Name],
-        [ClientSecret],
+        [ClientSecretHash],
         [Scope],
         [EncryptedPayload],
         [Key],
@@ -26,12 +26,12 @@ BEGIN
         [CreationDate],
         [RevisionDate]
     )
-    VALUES 
+    VALUES
     (
         @Id,
         @ServiceAccountId,
         @Name,
-        @ClientSecret,
+        @ClientSecretHash,
         @Scope,
         @EncryptedPayload,
         @Key,

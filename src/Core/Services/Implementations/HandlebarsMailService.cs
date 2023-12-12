@@ -1,8 +1,11 @@
 ﻿using System.Net;
 using System.Reflection;
+using Bit.Core.AdminConsole.Entities;
+using Bit.Core.AdminConsole.Entities.Provider;
+using Bit.Core.Auth.Entities;
+using Bit.Core.Auth.Models.Business;
+using Bit.Core.Auth.Models.Mail;
 using Bit.Core.Entities;
-using Bit.Core.Entities.Provider;
-using Bit.Core.Models.Business;
 using Bit.Core.Models.Mail;
 using Bit.Core.Models.Mail.FamiliesForEnterprise;
 using Bit.Core.Models.Mail.Provider;
@@ -15,6 +18,7 @@ namespace Bit.Core.Services;
 public class HandlebarsMailService : IMailService
 {
     private const string Namespace = "Bit.Core.MailTemplates.Handlebars";
+    private const string _utcTimeZoneDisplay = "UTC";
 
     private readonly GlobalSettings _globalSettings;
     private readonly IMailDeliveryService _mailDeliveryService;
@@ -44,7 +48,7 @@ public class HandlebarsMailService : IMailService
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
             SiteName = _globalSettings.SiteName
         };
-        await AddMessageContentAsync(message, "VerifyEmail", model);
+        await AddMessageContentAsync(message, "Auth.VerifyEmail", model);
         message.MetaData.Add("SendGridBypassListManagement", true);
         message.Category = "VerifyEmail";
         await _mailDeliveryService.SendEmailAsync(message);
@@ -62,7 +66,7 @@ public class HandlebarsMailService : IMailService
             Email = email,
             EmailEncoded = WebUtility.UrlEncode(email)
         };
-        await AddMessageContentAsync(message, "VerifyDelete", model);
+        await AddMessageContentAsync(message, "Auth.VerifyDelete", model);
         message.MetaData.Add("SendGridBypassListManagement", true);
         message.Category = "VerifyDelete";
         await _mailDeliveryService.SendEmailAsync(message);
@@ -107,7 +111,7 @@ public class HandlebarsMailService : IMailService
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
             SiteName = _globalSettings.SiteName
         };
-        await AddMessageContentAsync(message, "TwoFactorEmail", model);
+        await AddMessageContentAsync(message, "Auth.TwoFactorEmail", model);
         message.MetaData.Add("SendGridBypassListManagement", true);
         message.Category = "TwoFactorEmail";
         await _mailDeliveryService.SendEmailAsync(message);
@@ -122,7 +126,7 @@ public class HandlebarsMailService : IMailService
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
             SiteName = _globalSettings.SiteName
         };
-        await AddMessageContentAsync(message, "MasterPasswordHint", model);
+        await AddMessageContentAsync(message, "Auth.MasterPasswordHint", model);
         message.Category = "MasterPasswordHint";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -135,7 +139,7 @@ public class HandlebarsMailService : IMailService
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
             SiteName = _globalSettings.SiteName
         };
-        await AddMessageContentAsync(message, "NoMasterPasswordHint", model);
+        await AddMessageContentAsync(message, "Auth.NoMasterPasswordHint", model);
         message.Category = "NoMasterPasswordHint";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -191,6 +195,9 @@ public class HandlebarsMailService : IMailService
         var message = CreateDefaultMessage($"You Have Been Confirmed To {organizationName}", email);
         var model = new OrganizationUserConfirmedViewModel
         {
+            TitleFirst = "You're confirmed as a member of ",
+            TitleSecondBold = CoreHelpers.SanitizeForEmail(organizationName, false),
+            TitleThird = "!",
             OrganizationName = CoreHelpers.SanitizeForEmail(organizationName, false),
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
             SiteName = _globalSettings.SiteName
@@ -200,21 +207,24 @@ public class HandlebarsMailService : IMailService
         await _mailDeliveryService.SendEmailAsync(message);
     }
 
-    public Task SendOrganizationInviteEmailAsync(string organizationName, OrganizationUser orgUser, ExpiringToken token) =>
-        BulkSendOrganizationInviteEmailAsync(organizationName, new[] { (orgUser, token) });
+    public Task SendOrganizationInviteEmailAsync(string organizationName, OrganizationUser orgUser, ExpiringToken token, bool isFreeOrg, bool initOrganization = false) =>
+        BulkSendOrganizationInviteEmailAsync(organizationName, new[] { (orgUser, token) }, isFreeOrg, initOrganization);
 
-    public async Task BulkSendOrganizationInviteEmailAsync(string organizationName, IEnumerable<(OrganizationUser orgUser, ExpiringToken token)> invites)
+    public async Task BulkSendOrganizationInviteEmailAsync(string organizationName, IEnumerable<(OrganizationUser orgUser, ExpiringToken token)> invites, bool isFreeOrg, bool initOrganization = false)
     {
         MailQueueMessage CreateMessage(string email, object model)
         {
             var message = CreateDefaultMessage($"Join {organizationName}", email);
             return new MailQueueMessage(message, "OrganizationUserInvited", model);
         }
-
+        var freeOrgTitle = "A Bitwarden member invited you to an organization. Join now to start securing your passwords!";
         var messageModels = invites.Select(invite => CreateMessage(invite.orgUser.Email,
             new OrganizationUserInvitedViewModel
             {
-                OrganizationName = CoreHelpers.SanitizeForEmail(organizationName, false),
+                TitleFirst = isFreeOrg ? freeOrgTitle : "Join ",
+                TitleSecondBold = isFreeOrg ? string.Empty : CoreHelpers.SanitizeForEmail(organizationName, false),
+                TitleThird = isFreeOrg ? string.Empty : " on Bitwarden and start securing your passwords!",
+                OrganizationName = CoreHelpers.SanitizeForEmail(organizationName, false) + invite.orgUser.Status,
                 Email = WebUtility.UrlEncode(invite.orgUser.Email),
                 OrganizationId = invite.orgUser.OrganizationId.ToString(),
                 OrganizationUserId = invite.orgUser.Id.ToString(),
@@ -223,6 +233,7 @@ public class HandlebarsMailService : IMailService
                 OrganizationNameUrlEncoded = WebUtility.UrlEncode(organizationName),
                 WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
                 SiteName = _globalSettings.SiteName,
+                InitOrganization = initOrganization
             }
         ));
 
@@ -270,15 +281,26 @@ public class HandlebarsMailService : IMailService
         {
             Url = url.ToString()
         };
-        await AddMessageContentAsync(message, "PasswordlessSignIn", model);
+        await AddMessageContentAsync(message, "Auth.PasswordlessSignIn", model);
         message.Category = "PasswordlessSignIn";
         await _mailDeliveryService.SendEmailAsync(message);
     }
 
-    public async Task SendInvoiceUpcomingAsync(string email, decimal amount, DateTime dueDate,
-        List<string> items, bool mentionInvoices)
+    public async Task SendInvoiceUpcoming(
+        string email,
+        decimal amount,
+        DateTime dueDate,
+        List<string> items,
+        bool mentionInvoices) => await SendInvoiceUpcoming(new List<string> { email }, amount, dueDate, items, mentionInvoices);
+
+    public async Task SendInvoiceUpcoming(
+        IEnumerable<string> emails,
+        decimal amount,
+        DateTime dueDate,
+        List<string> items,
+        bool mentionInvoices)
     {
-        var message = CreateDefaultMessage("Your Subscription Will Renew Soon", email);
+        var message = CreateDefaultMessage("Your Subscription Will Renew Soon", emails);
         var model = new InvoiceUpcomingViewModel
         {
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
@@ -344,7 +366,7 @@ public class HandlebarsMailService : IMailService
             DeviceType = deviceType,
             TheDate = timestamp.ToLongDateString(),
             TheTime = timestamp.ToShortTimeString(),
-            TimeZone = "UTC",
+            TimeZone = _utcTimeZoneDisplay,
             IpAddress = ip
         };
         await AddMessageContentAsync(message, "NewDeviceLoggedIn", model);
@@ -361,10 +383,10 @@ public class HandlebarsMailService : IMailService
             SiteName = _globalSettings.SiteName,
             TheDate = timestamp.ToLongDateString(),
             TheTime = timestamp.ToShortTimeString(),
-            TimeZone = "UTC",
+            TimeZone = _utcTimeZoneDisplay,
             IpAddress = ip
         };
-        await AddMessageContentAsync(message, "RecoverTwoFactor", model);
+        await AddMessageContentAsync(message, "Auth.RecoverTwoFactor", model);
         message.Category = "RecoverTwoFactor";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -394,7 +416,7 @@ public class HandlebarsMailService : IMailService
 
     public async Task SendAdminResetPasswordEmailAsync(string email, string userName, string orgName)
     {
-        var message = CreateDefaultMessage("Master Password Has Been Changed", email);
+        var message = CreateDefaultMessage("Your admin has initiated account recovery", email);
         var model = new AdminResetPasswordViewModel()
         {
             UserName = GetUserIdentifier(email, userName),
@@ -478,6 +500,14 @@ public class HandlebarsMailService : IMailService
         Handlebars.RegisterTemplate("FullHtmlLayout", fullHtmlLayoutSource);
         var fullTextLayoutSource = await ReadSourceAsync("Layouts.Full.text");
         Handlebars.RegisterTemplate("FullTextLayout", fullTextLayoutSource);
+        var fullUpdatedHtmlLayoutSource = await ReadSourceAsync("Layouts.FullUpdated.html");
+        Handlebars.RegisterTemplate("FullUpdatedHtmlLayout", fullUpdatedHtmlLayoutSource);
+        var fullUpdatedTextLayoutSource = await ReadSourceAsync("Layouts.FullUpdated.text");
+        Handlebars.RegisterTemplate("FullUpdatedTextLayout", fullUpdatedTextLayoutSource);
+        var titleContactUsHtmlLayoutSource = await ReadSourceAsync("Layouts.TitleContactUs.html");
+        Handlebars.RegisterTemplate("TitleContactUsHtmlLayout", titleContactUsHtmlLayoutSource);
+        var titleContactUsTextLayoutSource = await ReadSourceAsync("Layouts.TitleContactUs.text");
+        Handlebars.RegisterTemplate("TitleContactUsTextLayout", titleContactUsTextLayoutSource);
 
         Handlebars.RegisterHelper("date", (writer, context, parameters) =>
         {
@@ -573,7 +603,7 @@ public class HandlebarsMailService : IMailService
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
             SiteName = _globalSettings.SiteName
         };
-        await AddMessageContentAsync(message, "EmergencyAccessInvited", model);
+        await AddMessageContentAsync(message, "Auth.EmergencyAccessInvited", model);
         message.Category = "EmergencyAccessInvited";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -587,7 +617,7 @@ public class HandlebarsMailService : IMailService
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
             SiteName = _globalSettings.SiteName
         };
-        await AddMessageContentAsync(message, "EmergencyAccessAccepted", model);
+        await AddMessageContentAsync(message, "Auth.EmergencyAccessAccepted", model);
         message.Category = "EmergencyAccessAccepted";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -601,7 +631,7 @@ public class HandlebarsMailService : IMailService
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
             SiteName = _globalSettings.SiteName
         };
-        await AddMessageContentAsync(message, "EmergencyAccessConfirmed", model);
+        await AddMessageContentAsync(message, "Auth.EmergencyAccessConfirmed", model);
         message.Category = "EmergencyAccessConfirmed";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -618,7 +648,7 @@ public class HandlebarsMailService : IMailService
             Action = emergencyAccess.Type.ToString(),
             DaysLeft = emergencyAccess.WaitTimeDays - Convert.ToInt32((remainingTime).TotalDays),
         };
-        await AddMessageContentAsync(message, "EmergencyAccessRecovery", model);
+        await AddMessageContentAsync(message, "Auth.EmergencyAccessRecovery", model);
         message.Category = "EmergencyAccessRecovery";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -630,7 +660,7 @@ public class HandlebarsMailService : IMailService
         {
             Name = CoreHelpers.SanitizeForEmail(approvingName),
         };
-        await AddMessageContentAsync(message, "EmergencyAccessApproved", model);
+        await AddMessageContentAsync(message, "Auth.EmergencyAccessApproved", model);
         message.Category = "EmergencyAccessApproved";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -642,7 +672,7 @@ public class HandlebarsMailService : IMailService
         {
             Name = CoreHelpers.SanitizeForEmail(rejectingName),
         };
-        await AddMessageContentAsync(message, "EmergencyAccessRejected", model);
+        await AddMessageContentAsync(message, "Auth.EmergencyAccessRejected", model);
         message.Category = "EmergencyAccessRejected";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -659,7 +689,7 @@ public class HandlebarsMailService : IMailService
             Action = emergencyAccess.Type.ToString(),
             DaysLeft = emergencyAccess.WaitTimeDays - Convert.ToInt32((remainingTime).TotalDays),
         };
-        await AddMessageContentAsync(message, "EmergencyAccessRecoveryReminder", model);
+        await AddMessageContentAsync(message, "Auth.EmergencyAccessRecoveryReminder", model);
         message.Category = "EmergencyAccessRecoveryReminder";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -672,7 +702,7 @@ public class HandlebarsMailService : IMailService
             Name = CoreHelpers.SanitizeForEmail(initiatingName),
             Action = emergencyAccess.Type.ToString(),
         };
-        await AddMessageContentAsync(message, "EmergencyAccessRecoveryTimedOut", model);
+        await AddMessageContentAsync(message, "Auth.EmergencyAccessRecoveryTimedOut", model);
         message.Category = "EmergencyAccessRecoveryTimedOut";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -826,7 +856,7 @@ public class HandlebarsMailService : IMailService
             WebVaultUrl = _globalSettings.BaseServiceUri.VaultWithHash,
             SiteName = _globalSettings.SiteName,
         };
-        await AddMessageContentAsync(message, "OTPEmail", model);
+        await AddMessageContentAsync(message, "Auth.OTPEmail", model);
         message.MetaData.Add("SendGridBypassListManagement", true);
         message.Category = "OTP";
         await _mailDeliveryService.SendEmailAsync(message);
@@ -839,12 +869,12 @@ public class HandlebarsMailService : IMailService
         {
             TheDate = utcNow.ToLongDateString(),
             TheTime = utcNow.ToShortTimeString(),
-            TimeZone = "UTC",
+            TimeZone = _utcTimeZoneDisplay,
             IpAddress = ip,
             AffectedEmail = email
 
         };
-        await AddMessageContentAsync(message, "FailedLoginAttempts", model);
+        await AddMessageContentAsync(message, "Auth.FailedLoginAttempts", model);
         message.Category = "FailedLoginAttempts";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -856,12 +886,12 @@ public class HandlebarsMailService : IMailService
         {
             TheDate = utcNow.ToLongDateString(),
             TheTime = utcNow.ToShortTimeString(),
-            TimeZone = "UTC",
+            TimeZone = _utcTimeZoneDisplay,
             IpAddress = ip,
             AffectedEmail = email
 
         };
-        await AddMessageContentAsync(message, "FailedTwoFactorAttempts", model);
+        await AddMessageContentAsync(message, "Auth.FailedTwoFactorAttempts", model);
         message.Category = "FailedTwoFactorAttempts";
         await _mailDeliveryService.SendEmailAsync(message);
     }
@@ -879,8 +909,56 @@ public class HandlebarsMailService : IMailService
         await _mailDeliveryService.SendEmailAsync(message);
     }
 
+    public async Task SendSecretsManagerMaxSeatLimitReachedEmailAsync(Organization organization, int maxSeatCount,
+        IEnumerable<string> ownerEmails)
+    {
+        var message = CreateDefaultMessage($"{organization.Name} Secrets Manager Seat Limit Reached", ownerEmails);
+        var model = new OrganizationSeatsMaxReachedViewModel
+        {
+            OrganizationId = organization.Id,
+            MaxSeatCount = maxSeatCount,
+        };
+
+        await AddMessageContentAsync(message, "OrganizationSmSeatsMaxReached", model);
+        message.Category = "OrganizationSmSeatsMaxReached";
+        await _mailDeliveryService.SendEmailAsync(message);
+    }
+
+    public async Task SendSecretsManagerMaxServiceAccountLimitReachedEmailAsync(Organization organization, int maxSeatCount,
+        IEnumerable<string> ownerEmails)
+    {
+        var message = CreateDefaultMessage($"{organization.Name} Secrets Manager Service Accounts Limit Reached", ownerEmails);
+        var model = new OrganizationServiceAccountsMaxReachedViewModel
+        {
+            OrganizationId = organization.Id,
+            MaxServiceAccountsCount = maxSeatCount,
+        };
+
+        await AddMessageContentAsync(message, "OrganizationSmServiceAccountsMaxReached", model);
+        message.Category = "OrganizationSmServiceAccountsMaxReached";
+        await _mailDeliveryService.SendEmailAsync(message);
+    }
+
+    public async Task SendTrustedDeviceAdminApprovalEmailAsync(string email, DateTime utcNow, string ip,
+        string deviceTypeAndIdentifier)
+    {
+        var message = CreateDefaultMessage("Login request approved", email);
+        var model = new TrustedDeviceAdminApprovalViewModel
+        {
+            TheDate = utcNow.ToLongDateString(),
+            TheTime = utcNow.ToShortTimeString(),
+            TimeZone = _utcTimeZoneDisplay,
+            IpAddress = ip,
+            DeviceType = deviceTypeAndIdentifier,
+        };
+        await AddMessageContentAsync(message, "Auth.TrustedDeviceAdminApproval", model);
+        message.Category = "TrustedDeviceAdminApproval";
+        await _mailDeliveryService.SendEmailAsync(message);
+    }
+
     private static string GetUserIdentifier(string email, string userName)
     {
         return string.IsNullOrEmpty(userName) ? email : CoreHelpers.SanitizeForEmail(userName, false);
     }
 }
+

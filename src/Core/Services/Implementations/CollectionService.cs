@@ -1,10 +1,11 @@
 ﻿using Bit.Core.Context;
 using Bit.Core.Entities;
-using Bit.Core.Enums;
 using Bit.Core.Exceptions;
-using Bit.Core.Models.Business;
 using Bit.Core.Models.Data;
 using Bit.Core.Repositories;
+using Bit.Core.Tools.Enums;
+using Bit.Core.Tools.Models.Business;
+using Bit.Core.Tools.Services;
 
 namespace Bit.Core.Services;
 
@@ -18,6 +19,7 @@ public class CollectionService : ICollectionService
     private readonly IMailService _mailService;
     private readonly IReferenceEventService _referenceEventService;
     private readonly ICurrentContext _currentContext;
+    private readonly IFeatureService _featureService;
 
     public CollectionService(
         IEventService eventService,
@@ -27,7 +29,8 @@ public class CollectionService : ICollectionService
         IUserRepository userRepository,
         IMailService mailService,
         IReferenceEventService referenceEventService,
-        ICurrentContext currentContext)
+        ICurrentContext currentContext,
+        IFeatureService featureService)
     {
         _eventService = eventService;
         _organizationRepository = organizationRepository;
@@ -37,15 +40,31 @@ public class CollectionService : ICollectionService
         _mailService = mailService;
         _referenceEventService = referenceEventService;
         _currentContext = currentContext;
+        _featureService = featureService;
     }
 
     public async Task SaveAsync(Collection collection, IEnumerable<CollectionAccessSelection> groups = null,
-        IEnumerable<CollectionAccessSelection> users = null, Guid? assignUserId = null)
+        IEnumerable<CollectionAccessSelection> users = null)
     {
         var org = await _organizationRepository.GetByIdAsync(collection.OrganizationId);
         if (org == null)
         {
             throw new BadRequestException("Organization not found");
+        }
+
+        var groupsList = groups?.ToList();
+        var usersList = users?.ToList();
+
+        // If using Flexible Collections - a collection should always have someone with Can Manage permissions
+        if (_featureService.IsEnabled(FeatureFlagKeys.FlexibleCollections, _currentContext))
+        {
+            var groupHasManageAccess = groupsList?.Any(g => g.Manage) ?? false;
+            var userHasManageAccess = usersList?.Any(u => u.Manage) ?? false;
+            if (!groupHasManageAccess && !userHasManageAccess)
+            {
+                throw new BadRequestException(
+                    "At least one member or group must have can manage permission.");
+            }
         }
 
         if (collection.Id == default(Guid))
@@ -60,26 +79,13 @@ public class CollectionService : ICollectionService
                 }
             }
 
-            await _collectionRepository.CreateAsync(collection, org.UseGroups ? groups : null, users);
-
-            // Assign a user to the newly created collection.
-            if (assignUserId.HasValue)
-            {
-                var orgUser = await _organizationUserRepository.GetByOrganizationAsync(org.Id, assignUserId.Value);
-                if (orgUser != null && orgUser.Status == Enums.OrganizationUserStatusType.Confirmed)
-                {
-                    await _collectionRepository.UpdateUsersAsync(collection.Id,
-                        new List<CollectionAccessSelection> {
-                            new CollectionAccessSelection { Id = orgUser.Id, ReadOnly = false } });
-                }
-            }
-
+            await _collectionRepository.CreateAsync(collection, org.UseGroups ? groupsList : null, usersList);
             await _eventService.LogCollectionEventAsync(collection, Enums.EventType.Collection_Created);
-            await _referenceEventService.RaiseEventAsync(new ReferenceEvent(ReferenceEventType.CollectionCreated, org));
+            await _referenceEventService.RaiseEventAsync(new ReferenceEvent(ReferenceEventType.CollectionCreated, org, _currentContext));
         }
         else
         {
-            await _collectionRepository.ReplaceAsync(collection, org.UseGroups ? groups : null, users);
+            await _collectionRepository.ReplaceAsync(collection, org.UseGroups ? groupsList : null, usersList);
             await _eventService.LogCollectionEventAsync(collection, Enums.EventType.Collection_Updated);
         }
     }
@@ -95,17 +101,23 @@ public class CollectionService : ICollectionService
         await _eventService.LogOrganizationUserEventAsync(orgUser, Enums.EventType.OrganizationUser_Updated);
     }
 
-    public async Task<IEnumerable<Collection>> GetOrganizationCollections(Guid organizationId)
+    public async Task<IEnumerable<Collection>> GetOrganizationCollectionsAsync(Guid organizationId)
     {
-        if (!await _currentContext.ViewAllCollections(organizationId) && !await _currentContext.ManageUsers(organizationId))
+        if (
+            !await _currentContext.ViewAssignedCollections(organizationId) &&
+            !await _currentContext.ViewAllCollections(organizationId) &&
+            !await _currentContext.ManageUsers(organizationId) &&
+            !await _currentContext.ManageGroups(organizationId) &&
+            !await _currentContext.AccessImportExport(organizationId)
+        )
         {
             throw new NotFoundException();
         }
 
         IEnumerable<Collection> orgCollections;
-        if (await _currentContext.OrganizationAdmin(organizationId) || await _currentContext.ViewAllCollections(organizationId))
+        if (await _currentContext.ViewAllCollections(organizationId) || await _currentContext.AccessImportExport(organizationId))
         {
-            // Admins, Owners, Providers and Custom (with collection management permissions) can access all items even if not assigned to them
+            // Admins, Owners, Providers and Custom (with collection management or import/export permissions) can access all items even if not assigned to them
             orgCollections = await _collectionRepository.GetManyByOrganizationIdAsync(organizationId);
         }
         else

@@ -1,4 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Bit.Core.AdminConsole.Entities;
+using Bit.Core.AdminConsole.Entities.Provider;
+using Bit.Core.AdminConsole.Enums.Provider;
 using Bit.Core.Entities;
 using Bit.Core.Enums;
 using Bit.Core.Models.Business;
@@ -6,6 +9,7 @@ using Bit.Core.Models.Data.Organizations.OrganizationUsers;
 using Bit.Core.Settings;
 using Bit.Core.Utilities;
 using Bit.Core.Vault.Entities;
+using Bit.SharedWeb.Utilities;
 
 namespace Bit.Admin.Models;
 
@@ -13,18 +17,28 @@ public class OrganizationEditModel : OrganizationViewModel
 {
     public OrganizationEditModel() { }
 
-    public OrganizationEditModel(Organization org, IEnumerable<OrganizationUserUserDetails> orgUsers,
+    public OrganizationEditModel(Provider provider)
+    {
+        Provider = provider;
+        BillingEmail = provider.Type == ProviderType.Reseller ? provider.BillingEmail : string.Empty;
+        PlanType = Core.Enums.PlanType.TeamsMonthly;
+        Plan = Core.Enums.PlanType.TeamsMonthly.GetDisplayAttribute()?.GetName();
+        LicenseKey = RandomLicenseKey;
+    }
+
+    public OrganizationEditModel(Organization org, Provider provider, IEnumerable<OrganizationUserUserDetails> orgUsers,
         IEnumerable<Cipher> ciphers, IEnumerable<Collection> collections, IEnumerable<Group> groups,
         IEnumerable<Policy> policies, BillingInfo billingInfo, IEnumerable<OrganizationConnection> connections,
-        GlobalSettings globalSettings)
-        : base(org, connections, orgUsers, ciphers, collections, groups, policies)
+        GlobalSettings globalSettings, int secrets, int projects, int serviceAccounts, int occupiedSmSeats)
+        : base(org, provider, connections, orgUsers, ciphers, collections, groups, policies, secrets, projects,
+            serviceAccounts, occupiedSmSeats)
     {
         BillingInfo = billingInfo;
         BraintreeMerchantId = globalSettings.Braintree.MerchantId;
 
         Name = org.Name;
         BusinessName = org.BusinessName;
-        BillingEmail = org.BillingEmail;
+        BillingEmail = provider?.Type == ProviderType.Reseller ? provider.BillingEmail : org.BillingEmail;
         PlanType = org.PlanType;
         Plan = org.Plan;
         Seats = org.Seats;
@@ -52,6 +66,11 @@ public class OrganizationEditModel : OrganizationViewModel
         Enabled = org.Enabled;
         LicenseKey = org.LicenseKey;
         ExpirationDate = org.ExpirationDate;
+        SmSeats = org.SmSeats;
+        MaxAutoscaleSmSeats = org.MaxAutoscaleSmSeats;
+        SmServiceAccounts = org.SmServiceAccounts;
+        MaxAutoscaleSmServiceAccounts = org.MaxAutoscaleSmServiceAccounts;
+        SecretsManagerBeta = org.SecretsManagerBeta;
     }
 
     public BillingInfo BillingInfo { get; set; }
@@ -60,7 +79,7 @@ public class OrganizationEditModel : OrganizationViewModel
     public string BraintreeMerchantId { get; set; }
 
     [Required]
-    [Display(Name = "Name")]
+    [Display(Name = "Organization Name")]
     public string Name { get; set; }
     [Display(Name = "Business Name")]
     public string BusinessName { get; set; }
@@ -123,6 +142,37 @@ public class OrganizationEditModel : OrganizationViewModel
     [Display(Name = "Expiration Date")]
     public DateTime? ExpirationDate { get; set; }
     public bool SalesAssistedTrialStarted { get; set; }
+    [Display(Name = "Seats")]
+    public int? SmSeats { get; set; }
+    [Display(Name = "Max Autoscale Seats")]
+    public int? MaxAutoscaleSmSeats { get; set; }
+    [Display(Name = "Service Accounts")]
+    public int? SmServiceAccounts { get; set; }
+    [Display(Name = "Max Autoscale Service Accounts")]
+    public int? MaxAutoscaleSmServiceAccounts { get; set; }
+    [Display(Name = "Secrets Manager Beta")]
+    public bool SecretsManagerBeta { get; set; }
+
+    /**
+     * Creates a Plan[] object for use in Javascript
+     * This is mapped manually below to provide some type safety in case the plan objects change
+     * Add mappings for individual properties as you need them
+     */
+    public IEnumerable<Dictionary<string, object>> GetPlansHelper() =>
+        StaticStore.Plans
+            .Where(p => p.SupportsSecretsManager)
+            .Select(p => new Dictionary<string, object>
+            {
+                { "type", p.Type },
+                { "baseServiceAccount", p.SecretsManager.BaseServiceAccount }
+            });
+
+    public Organization CreateOrganization(Provider provider)
+    {
+        BillingEmail = provider.BillingEmail;
+
+        return ToOrganization(new Organization());
+    }
 
     public Organization ToOrganization(Organization existingOrganization)
     {
@@ -156,6 +206,11 @@ public class OrganizationEditModel : OrganizationViewModel
         existingOrganization.LicenseKey = LicenseKey;
         existingOrganization.ExpirationDate = ExpirationDate;
         existingOrganization.MaxAutoscaleSeats = MaxAutoscaleSeats;
+        existingOrganization.SmSeats = SmSeats;
+        existingOrganization.MaxAutoscaleSmSeats = MaxAutoscaleSmSeats;
+        existingOrganization.SmServiceAccounts = SmServiceAccounts;
+        existingOrganization.MaxAutoscaleSmServiceAccounts = MaxAutoscaleSmServiceAccounts;
+        existingOrganization.SecretsManagerBeta = SecretsManagerBeta;
         return existingOrganization;
     }
 }

@@ -1,5 +1,6 @@
-﻿using Bit.Core.Entities;
-using Bit.Core.Entities.Provider;
+﻿using Bit.Core.AdminConsole.Entities;
+using Bit.Core.AdminConsole.Entities.Provider;
+using Bit.Core.Entities;
 using Bit.Core.Enums;
 using Bit.Core.SecretsManager.Entities;
 using Bit.Core.Vault.Entities;
@@ -70,8 +71,13 @@ public class NoopEventService : IEventService
         return Task.FromResult(0);
     }
 
+    public Task LogProviderOrganizationEventsAsync(IEnumerable<(ProviderOrganization, EventType, DateTime?)> events)
+    {
+        return Task.FromResult(0);
+    }
+
     public Task LogOrganizationDomainEventAsync(OrganizationDomain organizationDomain, EventType type,
-        DateTime? date = null)
+            DateTime? date = null)
     {
         return Task.FromResult(0);
     }
@@ -110,6 +116,12 @@ public class NoopEventService : IEventService
     }
 
     public Task LogServiceAccountSecretEventAsync(Guid serviceAccountId, Secret secret, EventType type,
+        DateTime? date = null)
+    {
+        return Task.FromResult(0);
+    }
+
+    public Task LogServiceAccountSecretsEventAsync(Guid serviceAccountId, IEnumerable<Secret> secrets, EventType type,
         DateTime? date = null)
     {
         return Task.FromResult(0);

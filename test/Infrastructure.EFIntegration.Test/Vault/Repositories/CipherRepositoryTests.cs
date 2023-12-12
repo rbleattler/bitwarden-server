@@ -1,4 +1,5 @@
-﻿using Bit.Core.Entities;
+﻿using Bit.Core.AdminConsole.Entities;
+using Bit.Core.Entities;
 using Bit.Core.Models.Data;
 using Bit.Core.Test.AutoFixture.Attributes;
 using Bit.Core.Vault.Entities;
@@ -180,18 +181,14 @@ public class CipherRepositoryTests
         List<EfRepo.OrganizationRepository> efOrgRepos
             ) => await DeleteAsync_CipherIsDeleted(cipher, user, org, suts, efUserRepos, efOrgRepos);
     [CiSkippedTheory, EfOrganizationCipherCustomize, BitAutoData]
-    public Task OrganizationCipher_DeleteAsync_CipherIsDeleted(
+    public async Task OrganizationCipher_DeleteAsync_CipherIsDeleted(
         Cipher cipher,
         User user,
         Organization org,
         List<EfVaultRepo.CipherRepository> suts,
         List<EfRepo.UserRepository> efUserRepos,
         List<EfRepo.OrganizationRepository> efOrgRepos
-            )
-    {
-        DeleteAsync_CipherIsDeleted(cipher, user, org, suts, efUserRepos, efOrgRepos);
-        return Task.CompletedTask;
-    }
+            ) => await DeleteAsync_CipherIsDeleted(cipher, user, org, suts, efUserRepos, efOrgRepos);
 
     private async Task DeleteAsync_CipherIsDeleted(
         Cipher cipher,

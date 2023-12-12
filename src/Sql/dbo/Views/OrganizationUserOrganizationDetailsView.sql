@@ -35,12 +35,18 @@ SELECT
     OU.[Permissions],
     PO.[ProviderId],
     P.[Name] ProviderName,
+    P.[Type] ProviderType,
     SS.[Data] SsoConfig,
     OS.[FriendlyName] FamilySponsorshipFriendlyName,
     OS.[LastSyncDate] FamilySponsorshipLastSyncDate,
     OS.[ToDelete] FamilySponsorshipToDelete,
     OS.[ValidUntil] FamilySponsorshipValidUntil,
-    OU.[AccessSecretsManager]
+    OU.[AccessSecretsManager],
+    O.[UsePasswordManager],
+    O.[SmSeats],
+    O.[SmServiceAccounts],
+    O.[LimitCollectionCreationDeletion],
+    O.[AllowAdminAccessToAllCollectionItems]
 FROM
     [dbo].[OrganizationUser] OU
 LEFT JOIN

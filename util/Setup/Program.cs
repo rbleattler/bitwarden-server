@@ -1,7 +1,7 @@
 ﻿using System.Globalization;
 using System.Net.Http.Json;
 using Bit.Migrator;
-using Microsoft.Data.SqlClient;
+using Bit.Setup.Enums;
 
 namespace Bit.Setup;
 
@@ -187,41 +187,22 @@ public class Program
 
     private static void MigrateDatabase(int attempt = 1)
     {
-        try
-        {
-            Helpers.WriteLine(_context, "Migrating database.");
-            var vaultConnectionString = Helpers.GetValueFromEnvFile("global",
-                "globalSettings__sqlServer__connectionString");
-            var migrator = new DbMigrator(vaultConnectionString, null);
-            var success = migrator.MigrateMsSqlDatabase(false);
-            if (success)
-            {
-                Helpers.WriteLine(_context, "Migration successful.");
-            }
-            else
-            {
-                Helpers.WriteLine(_context, "Migration failed.");
-            }
-        }
-        catch (SqlException e)
-        {
-            if (e.Message.Contains("Server is in script upgrade mode") && attempt < 10)
-            {
-                var nextAttempt = attempt + 1;
-                Helpers.WriteLine(_context, "Database is in script upgrade mode. " +
-                    "Trying again (attempt #{0})...", nextAttempt);
-                System.Threading.Thread.Sleep(20000);
-                MigrateDatabase(nextAttempt);
-                return;
-            }
-            throw;
-        }
+        var vaultConnectionString = Helpers.GetValueFromEnvFile("global",
+            "globalSettings__sqlServer__connectionString");
+        var migrator = new DbMigrator(vaultConnectionString, null);
+
+        var log = false;
+
+        migrator.MigrateMsSqlDatabaseWithRetries(log);
+
+        migrator.MigrateMsSqlDatabaseWithRetries(log, true, MigratorConstants.TransitionMigrationsFolderName);
     }
 
     private static bool ValidateInstallation()
     {
         var installationId = string.Empty;
         var installationKey = string.Empty;
+        CloudRegion cloudRegion;
 
         if (_context.Parameters.ContainsKey("install-id"))
         {
@@ -229,7 +210,13 @@ public class Program
         }
         else
         {
-            installationId = Helpers.ReadInput("Enter your installation id (get at https://bitwarden.com/host)");
+            var prompt = "Enter your installation id (get at https://bitwarden.com/host)";
+            installationId = Helpers.ReadInput(prompt);
+            while (string.IsNullOrEmpty(installationId))
+            {
+                Helpers.WriteError("Invalid input for installation id. Please try again.");
+                installationId = Helpers.ReadInput(prompt);
+            }
         }
 
         if (!Guid.TryParse(installationId.Trim(), out var installationidGuid))
@@ -244,26 +231,61 @@ public class Program
         }
         else
         {
-            installationKey = Helpers.ReadInput("Enter your installation key");
+            var prompt = "Enter your installation key";
+            installationKey = Helpers.ReadInput(prompt);
+            while (string.IsNullOrEmpty(installationKey))
+            {
+                Helpers.WriteError("Invalid input for installation key. Please try again.");
+                installationKey = Helpers.ReadInput(prompt);
+            }
+        }
+
+        if (_context.Parameters.ContainsKey("cloud-region"))
+        {
+            Enum.TryParse(_context.Parameters["cloud-region"], out cloudRegion);
+        }
+        else
+        {
+            var prompt = "Enter your region (US/EU) [US]";
+            var region = Helpers.ReadInput(prompt);
+            if (string.IsNullOrEmpty(region)) region = "US";
+
+            while (!Enum.TryParse(region, out cloudRegion))
+            {
+                Helpers.WriteError("Invalid input for region. Please try again.");
+                region = Helpers.ReadInput(prompt);
+                if (string.IsNullOrEmpty(region)) region = "US";
+            }
         }
 
         _context.Install.InstallationId = installationidGuid;
         _context.Install.InstallationKey = installationKey;
+        _context.Install.CloudRegion = cloudRegion;
 
         try
         {
-            var response = new HttpClient().GetAsync("https://api.bitwarden.com/installations/" +
-                _context.Install.InstallationId).GetAwaiter().GetResult();
+            string url;
+            switch (cloudRegion)
+            {
+                case CloudRegion.EU:
+                    url = "https://api.bitwarden.eu/installations/";
+                    break;
+                case CloudRegion.US:
+                default:
+                    url = "https://api.bitwarden.com/installations/";
+                    break;
+            }
+            var response = new HttpClient().GetAsync(url + _context.Install.InstallationId).GetAwaiter().GetResult();
 
             if (!response.IsSuccessStatusCode)
             {
                 if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
-                    Console.WriteLine("Invalid installation id.");
+                    Console.WriteLine($"Invalid installation id for {cloudRegion.ToString()} region.");
                 }
                 else
                 {
-                    Console.WriteLine("Unable to validate installation id.");
+                    Console.WriteLine($"Unable to validate installation id for {cloudRegion.ToString()} region.");
                 }
 
                 return false;
@@ -272,7 +294,7 @@ public class Program
             var result = response.Content.ReadFromJsonAsync<InstallationValidationResponseModel>().GetAwaiter().GetResult();
             if (!result.Enabled)
             {
-                Console.WriteLine("Installation id has been disabled.");
+                Console.WriteLine($"Installation id has been disabled in the {cloudRegion.ToString()} region.");
                 return false;
             }
 
@@ -280,7 +302,7 @@ public class Program
         }
         catch
         {
-            Console.WriteLine("Unable to validate installation id. Problem contacting Bitwarden server.");
+            Console.WriteLine($"Unable to validate installation id. Problem contacting Bitwarden {cloudRegion.ToString()} server.");
             return false;
         }
     }

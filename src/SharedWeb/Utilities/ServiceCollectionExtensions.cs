@@ -1,27 +1,42 @@
-﻿using System.Reflection;
+﻿using System.Net;
+using System.Reflection;
 using System.Security.Claims;
 using System.Security.Cryptography.X509Certificates;
 using AspNetCoreRateLimit;
+using Bit.Core.AdminConsole.Services;
+using Bit.Core.AdminConsole.Services.Implementations;
+using Bit.Core.AdminConsole.Services.NoopImplementations;
+using Bit.Core.Auth.Enums;
+using Bit.Core.Auth.Identity;
+using Bit.Core.Auth.IdentityServer;
+using Bit.Core.Auth.LoginFeatures;
+using Bit.Core.Auth.Models.Business.Tokenables;
+using Bit.Core.Auth.Services;
+using Bit.Core.Auth.Services.Implementations;
+using Bit.Core.Auth.UserFeatures;
 using Bit.Core.Entities;
 using Bit.Core.Enums;
 using Bit.Core.HostedServices;
 using Bit.Core.Identity;
 using Bit.Core.IdentityServer;
-using Bit.Core.LoginFeatures;
-using Bit.Core.Models.Business.Tokenables;
 using Bit.Core.OrganizationFeatures;
 using Bit.Core.Repositories;
 using Bit.Core.Resources;
+using Bit.Core.SecretsManager.Repositories;
+using Bit.Core.SecretsManager.Repositories.Noop;
 using Bit.Core.Services;
 using Bit.Core.Settings;
 using Bit.Core.Tokens;
+using Bit.Core.Tools.Services;
 using Bit.Core.Utilities;
 using Bit.Core.Vault.Services;
 using Bit.Infrastructure.Dapper;
+using Bit.Infrastructure.EntityFramework;
+using DnsClient;
+using Duende.IdentityServer.Configuration;
 using IdentityModel;
-using IdentityServer4.AccessTokenValidation;
-using IdentityServer4.Configuration;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
@@ -113,7 +128,7 @@ public static class ServiceCollectionExtensions
     public static void AddBaseServices(this IServiceCollection services, IGlobalSettings globalSettings)
     {
         services.AddScoped<ICipherService, CipherService>();
-        services.AddScoped<IUserService, UserService>();
+        services.AddUserServices(globalSettings);
         services.AddOrganizationServices(globalSettings);
         services.AddScoped<ICollectionService, CollectionService>();
         services.AddScoped<IGroupService, GroupService>();
@@ -123,6 +138,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDeviceService, DeviceService>();
         services.AddSingleton<IAppleIapService, AppleIapService>();
         services.AddScoped<ISsoConfigService, SsoConfigService>();
+        services.AddScoped<IAuthRequestService, AuthRequestService>();
         services.AddScoped<ISendService, SendService>();
         services.AddLoginServices();
         services.AddScoped<IOrganizationDomainService, OrganizationDomainService>();
@@ -137,6 +153,7 @@ public static class ServiceCollectionExtensions
                 serviceProvider.GetDataProtectionProvider(),
                 serviceProvider.GetRequiredService<ILogger<DataProtectorTokenFactory<EmergencyAccessInviteTokenable>>>())
         );
+
         services.AddSingleton<IDataProtectorTokenFactory<HCaptchaTokenable>>(serviceProvider =>
             new DataProtectorTokenFactory<HCaptchaTokenable>(
                 HCaptchaTokenable.ClearTextPrefix,
@@ -144,12 +161,39 @@ public static class ServiceCollectionExtensions
                 serviceProvider.GetDataProtectionProvider(),
                 serviceProvider.GetRequiredService<ILogger<DataProtectorTokenFactory<HCaptchaTokenable>>>())
         );
+
         services.AddSingleton<IDataProtectorTokenFactory<SsoTokenable>>(serviceProvider =>
             new DataProtectorTokenFactory<SsoTokenable>(
                 SsoTokenable.ClearTextPrefix,
                 SsoTokenable.DataProtectorPurpose,
                 serviceProvider.GetDataProtectionProvider(),
                 serviceProvider.GetRequiredService<ILogger<DataProtectorTokenFactory<SsoTokenable>>>()));
+        services.AddSingleton<IDataProtectorTokenFactory<WebAuthnCredentialCreateOptionsTokenable>>(serviceProvider =>
+            new DataProtectorTokenFactory<WebAuthnCredentialCreateOptionsTokenable>(
+                WebAuthnCredentialCreateOptionsTokenable.ClearTextPrefix,
+                WebAuthnCredentialCreateOptionsTokenable.DataProtectorPurpose,
+                serviceProvider.GetDataProtectionProvider(),
+                serviceProvider.GetRequiredService<ILogger<DataProtectorTokenFactory<WebAuthnCredentialCreateOptionsTokenable>>>()));
+        services.AddSingleton<IDataProtectorTokenFactory<WebAuthnLoginAssertionOptionsTokenable>>(serviceProvider =>
+            new DataProtectorTokenFactory<WebAuthnLoginAssertionOptionsTokenable>(
+                WebAuthnLoginAssertionOptionsTokenable.ClearTextPrefix,
+                WebAuthnLoginAssertionOptionsTokenable.DataProtectorPurpose,
+                serviceProvider.GetDataProtectionProvider(),
+                serviceProvider.GetRequiredService<ILogger<DataProtectorTokenFactory<WebAuthnLoginAssertionOptionsTokenable>>>()));
+        services.AddSingleton<IDataProtectorTokenFactory<SsoEmail2faSessionTokenable>>(serviceProvider =>
+            new DataProtectorTokenFactory<SsoEmail2faSessionTokenable>(
+                SsoEmail2faSessionTokenable.ClearTextPrefix,
+                SsoEmail2faSessionTokenable.DataProtectorPurpose,
+                serviceProvider.GetDataProtectionProvider(),
+                serviceProvider.GetRequiredService<ILogger<DataProtectorTokenFactory<SsoEmail2faSessionTokenable>>>()));
+
+        services.AddSingleton<IOrgUserInviteTokenableFactory, OrgUserInviteTokenableFactory>();
+        services.AddSingleton<IDataProtectorTokenFactory<OrgUserInviteTokenable>>(serviceProvider =>
+            new DataProtectorTokenFactory<OrgUserInviteTokenable>(
+                OrgUserInviteTokenable.ClearTextPrefix,
+                OrgUserInviteTokenable.DataProtectorPurpose,
+                serviceProvider.GetDataProtectionProvider(),
+                serviceProvider.GetRequiredService<ILogger<DataProtectorTokenFactory<OrgUserInviteTokenable>>>()));
     }
 
     public static void AddDefaultServices(this IServiceCollection services, GlobalSettings globalSettings)
@@ -175,6 +219,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IStripeSyncService, StripeSyncService>();
         services.AddSingleton<IMailService, HandlebarsMailService>();
         services.AddSingleton<ILicensingService, LicensingService>();
+        services.AddSingleton<ILookupClient>(_ =>
+        {
+            var options = new LookupClientOptions { Timeout = TimeSpan.FromSeconds(15), UseTcpOnly = true };
+            return new LookupClient(options);
+        });
         services.AddSingleton<IDnsResolverService, DnsResolverService>();
         services.AddSingleton<IFeatureService, LaunchDarklyFeatureService>();
         services.AddTokenizers();
@@ -308,6 +357,9 @@ public static class ServiceCollectionExtensions
     public static void AddOosServices(this IServiceCollection services)
     {
         services.AddScoped<IProviderService, NoopProviderService>();
+        services.AddScoped<IServiceAccountRepository, NoopServiceAccountRepository>();
+        services.AddScoped<ISecretRepository, NoopSecretRepository>();
+        services.AddScoped<IProjectRepository, NoopProjectRepository>();
     }
 
     public static void AddNoopServices(this IServiceCollection services)
@@ -383,16 +435,24 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services, GlobalSettings globalSettings, IWebHostEnvironment environment,
         Action<AuthorizationOptions> addAuthorization)
     {
-        services
-            .AddAuthentication(IdentityServerAuthenticationDefaults.AuthenticationScheme)
-            .AddIdentityServerAuthentication(options =>
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(options =>
             {
+                options.MapInboundClaims = false;
                 options.Authority = globalSettings.BaseServiceUri.InternalIdentity;
                 options.RequireHttpsMetadata = !environment.IsDevelopment() &&
                     globalSettings.BaseServiceUri.InternalIdentity.StartsWith("https");
-                options.TokenRetriever = TokenRetrieval.FromAuthorizationHeaderOrQueryString();
-                options.NameClaimType = ClaimTypes.Email;
-                options.SupportedTokens = SupportedTokens.Jwt;
+                options.TokenValidationParameters.ValidateAudience = false;
+                options.TokenValidationParameters.ValidTypes = new[] { "at+jwt" };
+                options.TokenValidationParameters.NameClaimType = ClaimTypes.Email;
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = (context) =>
+                    {
+                        context.Token = TokenRetrieval.FromAuthorizationHeaderOrQueryString()(context.Request);
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
         if (addAuthorization != null)
@@ -451,6 +511,11 @@ public static class ServiceCollectionExtensions
         {
             identityServerBuilder.AddSigningCredential(certificate);
         }
+        else if (env.IsDevelopment() && !string.IsNullOrEmpty(globalSettings.DevelopmentDirectory))
+        {
+            var developerSigningKeyPath = Path.Combine(globalSettings.DevelopmentDirectory, "signingkey.jwk");
+            identityServerBuilder.AddDeveloperSigningCredential(true, developerSigningKeyPath);
+        }
         else if (env.IsDevelopment())
         {
             identityServerBuilder.AddDeveloperSigningCredential(false);
@@ -463,7 +528,7 @@ public static class ServiceCollectionExtensions
     }
 
     public static GlobalSettings AddGlobalSettingsServices(this IServiceCollection services,
-        IConfiguration configuration, IWebHostEnvironment environment)
+        IConfiguration configuration, IHostEnvironment environment)
     {
         var globalSettings = new GlobalSettings();
         ConfigurationBinder.Bind(configuration.GetSection("GlobalSettings"), globalSettings);
@@ -509,18 +574,36 @@ public static class ServiceCollectionExtensions
         });
     }
 
-    public static void UseForwardedHeaders(this IApplicationBuilder app, GlobalSettings globalSettings)
+    public static void UseForwardedHeaders(this IApplicationBuilder app, IGlobalSettings globalSettings)
     {
         var options = new ForwardedHeadersOptions
         {
             ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
         };
+
+        if (!globalSettings.UnifiedDeployment)
+        {
+            // Trust the X-Forwarded-Host header of the nginx docker container
+            try
+            {
+                var nginxIp = Dns.GetHostEntry("nginx")?.AddressList.FirstOrDefault();
+                if (nginxIp != null)
+                {
+                    options.KnownProxies.Add(nginxIp);
+                }
+            }
+            catch
+            {
+                // Ignore DNS errors
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(globalSettings.KnownProxies))
         {
             var proxies = globalSettings.KnownProxies.Split(',');
             foreach (var proxy in proxies)
             {
-                if (System.Net.IPAddress.TryParse(proxy.Trim(), out var ip))
+                if (IPAddress.TryParse(proxy.Trim(), out var ip))
                 {
                     options.KnownProxies.Add(ip);
                 }

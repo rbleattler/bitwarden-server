@@ -1,4 +1,5 @@
-﻿using Bit.Core.Settings.LoggingSettings;
+﻿using Bit.Core.Auth.Settings;
+using Bit.Core.Settings.LoggingSettings;
 
 namespace Bit.Core.Settings;
 
@@ -16,6 +17,7 @@ public class GlobalSettings : IGlobalSettings
     }
 
     public bool SelfHosted { get; set; }
+    public bool UnifiedDeployment { get; set; }
     public virtual string KnownProxies { get; set; }
     public virtual string SiteName { get; set; }
     public virtual string ProjectName { get; set; }
@@ -78,6 +80,7 @@ public class GlobalSettings : IGlobalSettings
     public virtual IPasswordlessAuthSettings PasswordlessAuth { get; set; } = new PasswordlessAuthSettings();
     public virtual IDomainVerificationSettings DomainVerification { get; set; } = new DomainVerificationSettings();
     public virtual ILaunchDarklySettings LaunchDarkly { get; set; } = new LaunchDarklySettings();
+    public virtual string DevelopmentDirectory { get; set; }
 
     public string BuildExternalUri(string explicitValue, string name)
     {
@@ -141,6 +144,7 @@ public class GlobalSettings : IGlobalSettings
             _globalSettings = globalSettings;
         }
 
+        public string CloudRegion { get; set; }
         public string Vault { get; set; }
         public string VaultWithHash => $"{Vault}/#";
 
@@ -323,6 +327,7 @@ public class GlobalSettings : IGlobalSettings
         public string CertificateThumbprint { get; set; }
         public string CertificatePassword { get; set; }
         public string RedisConnectionString { get; set; }
+        public string LicenseKey { get; set; } = "eyJhbGciOiJQUzI1NiIsImtpZCI6IklkZW50aXR5U2VydmVyTGljZW5zZWtleS83Y2VhZGJiNzgxMzA0NjllODgwNjg5MTAyNTQxNGYxNiIsInR5cCI6ImxpY2Vuc2Urand0In0.eyJpc3MiOiJodHRwczovL2R1ZW5kZXNvZnR3YXJlLmNvbSIsImF1ZCI6IklkZW50aXR5U2VydmVyIiwiaWF0IjoxNzAxODIwODAwLCJleHAiOjE3MzM0NDMyMDAsImNvbXBhbnlfbmFtZSI6IkJpdHdhcmRlbiBJbmMuIiwiY29udGFjdF9pbmZvIjoiY29udGFjdEBkdWVuZGVzb2Z0d2FyZS5jb20iLCJlZGl0aW9uIjoiU3RhcnRlciIsImlkIjoiNDMxOSIsImZlYXR1cmUiOlsiaXN2IiwidW5saW1pdGVkX2NsaWVudHMiXSwicHJvZHVjdCI6IkJpdHdhcmRlbiJ9.iLA771PffgIh0ClRS8OWHbg2cAgjhgOkUjRRkLNr9dpQXhYZkVKdpUn-Gw9T7grsGcAx0f4p-TQmtcCpbN9EJCF5jlF0-NfsRTp_gmCgQ5eXyiE4DzJp2OCrz_3STf07N1dILwhD3nk9rzcA6SRQ4_kja8wAMHKnD5LisW98r5DfRDBecRs16KS5HUhg99DRMR5fd9ntfydVMTC_E23eEOHVLsR4YhiSXaEINPjFDG1czyOBClJItDW8g9X8qlClZegr630UjnKKg06A4usoL25VFHHn8Ew3v-_-XdlWoWsIpMMVvacwZT8rwkxjIesFNsXG6yzuROIhaxAvB1297A";
     }
 
     public class DataProtectionSettings
@@ -389,7 +394,7 @@ public class GlobalSettings : IGlobalSettings
         /// </summary>
         /// <remarks>
         /// The certificate path and <see cref="CertificatePassword"/> are passed into the <see cref="System.Security.Cryptography.X509Certificates.X509Certificate2.X509Certificate2(string, string)" />.
-        /// The file format of the certificate may be binary encded (DER) or base64. If the private key is encrypted, provide the password in <see cref="CertificatePassword"/>,
+        /// The file format of the certificate may be binary encoded (DER) or base64. If the private key is encrypted, provide the password in <see cref="CertificatePassword"/>,
         /// </remarks>
         public string CertificatePath { get; set; }
         /// <summary>
@@ -398,7 +403,7 @@ public class GlobalSettings : IGlobalSettings
         /// <value></value>
         public string CertificatePassword { get; set; }
         /// <summary>
-        /// The thumbprint of the certificate in the X.509 certificate store for personal certificates for the user account running Bitwarden. 
+        /// The thumbprint of the certificate in the X.509 certificate store for personal certificates for the user account running Bitwarden.
         /// </summary>
         /// <value></value>
         public string CertificateThumbprint { get; set; }
@@ -480,6 +485,7 @@ public class GlobalSettings : IGlobalSettings
     {
         public string ApplicationCacheTopicName { get; set; }
         public string ApplicationCacheSubscriptionName { get; set; }
+        public string WebSiteInstanceId { get; set; }
     }
 
     public class AppleIapSettings
@@ -532,6 +538,9 @@ public class GlobalSettings : IGlobalSettings
     public class PasswordlessAuthSettings : IPasswordlessAuthSettings
     {
         public bool KnownDevicesOnly { get; set; } = true;
+        public TimeSpan UserRequestExpiration { get; set; } = TimeSpan.FromMinutes(15);
+        public TimeSpan AdminRequestExpiration { get; set; } = TimeSpan.FromDays(7);
+        public TimeSpan AfterAdminApprovalExpiration { get; set; } = TimeSpan.FromHours(12);
     }
 
     public class DomainVerificationSettings : IDomainVerificationSettings
@@ -544,5 +553,6 @@ public class GlobalSettings : IGlobalSettings
     {
         public string SdkKey { get; set; }
         public string FlagDataFilePath { get; set; } = "flags.json";
+        public Dictionary<string, string> FlagValues { get; set; } = new Dictionary<string, string>();
     }
 }
